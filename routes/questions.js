@@ -17,16 +17,31 @@ router.get('/', async (req, res) => {
 });
 
 // Submit a question manually
+// Submit a question manually
 router.post('/', async (req, res) => {
-  const { course_id, year, content, type, options, answer, topic } = req.body;
+  try {
+    console.log('Request body:', req.body);
+    const { course_id, year, content, type, options, answer, topic } = req.body;
 
-  const { data, error } = await supabase
-    .from('questions')
-    .insert([{ course_id, year, content, type, options, answer, topic }])
-    .select();
+    if (!course_id || !content) {
+      return res.status(400).json({ error: 'course_id and content are required' });
+    }
 
-  if (error) return res.status(500).json({ error: error.message });
-  res.status(201).json(data[0]);
+    const { data, error } = await supabase
+      .from('questions')
+      .insert([{ course_id, year, content, type, options, answer, topic }])
+      .select();
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.status(201).json(data[0]);
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
