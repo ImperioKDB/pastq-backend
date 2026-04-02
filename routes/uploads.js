@@ -1,11 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const pdfParse = require('pdf-parse');
 const supabase = require('../db');
-const { extractQuestions } = require('../services/huggingface');
+const { extractQuestionsFromImage } = require('../services/gemini');
 
-// Store file in memory temporarily
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.post('/', upload.single('file'), async (req, res) => {
@@ -15,38 +13,33 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
 
-    // Step 1: Extract text from PDF
-    let rawText = '';
-    if (file.mimetype === 'application/pdf') {
-      const parsed = await pdfParse(file.buffer);
-      rawText = parsed.text;
-    } else {
-      return res.status(400).json({ error: 'Only PDF files supported for now' });
-    }
+    console.log('File received:', file.originalname, file.mimetype);
 
-    if (!rawText || rawText.trim().length < 50) {
-      return res.status(400).json({ error: 'Could not extract text from PDF' });
-    }
-
-    // Step 2: Upload raw file to Supabase Storage
+    // Step 1: Upload raw file to Supabase Storage
     const fileName = `uploads/${Date.now()}_${file.originalname}`;
     const { data: fileData, error: fileError } = await supabase.storage
       .from('past-questions')
       .upload(fileName, file.buffer, { contentType: file.mimetype });
 
     if (fileError) console.error('Storage error:', fileError.message);
-
     const fileUrl = fileData?.path || fileName;
 
-    // Step 3: Save upload record
+    // Step 2: Save upload record
     const { data: uploadRecord } = await supabase
       .from('uploads')
       .insert([{ file_url: fileUrl, course_id, year, status: 'processing' }])
       .select()
       .single();
 
-    // Step 4: Send text to Hugging Face for extraction
-    const questions = await extractQuestions(rawText, course_code, year);
+    // Step 3: Send directly to Gemini as image
+    console.log('Sending to Gemini...');
+    const questions = await extractQuestionsFromImage(
+      file.buffer,
+      course_code,
+      year
+    );
+
+    console.log(`Gemini extracted ${questions.length} questions`);
 
     if (questions.length === 0) {
       await supabase
@@ -56,8 +49,8 @@ router.post('/', upload.single('file'), async (req, res) => {
       return res.status(422).json({ error: 'No questions could be extracted' });
     }
 
-    // Step 5: Save each question to database
-    const questionsToInsert = questions.map((q) => ({
+    // Step 4: Save questions to database
+    const questionsToInsert = questions.map(q => ({
       course_id,
       year: parseInt(year),
       content: q.content,
@@ -76,7 +69,7 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     if (qError) throw new Error(qError.message);
 
-    // Step 6: Mark upload as done
+    // Step 5: Mark upload as done
     await supabase
       .from('uploads')
       .update({ status: 'done' })
@@ -88,7 +81,7 @@ router.post('/', upload.single('file'), async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error('Upload error:', err);
     res.status(500).json({ error: err.message });
   }
 });
