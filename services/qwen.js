@@ -10,27 +10,42 @@ async function extractQuestionsFromPDF(pdfBuffer, courseCode, year) {
   });
 
   let allQuestions = [];
-  const pageCount = 3;
+  let page = 1;
+  let hasMorePages = true;
 
-  for (let page = 1; page <= pageCount; page++) {
+  while (hasMorePages) {
     try {
       console.log(`Processing page ${page}...`);
       const result = await converter(page, { responseType: 'buffer' });
 
       if (!result || !result.buffer) {
-        console.log(`Page ${page} not found, stopping`);
+        console.log(`No more pages after page ${page - 1}`);
+        hasMorePages = false;
         break;
       }
 
       const questions = await sendToQwen(result.buffer, courseCode, year, page);
       allQuestions = allQuestions.concat(questions);
 
+      console.log(`Page ${page} done — ${questions.length} questions found`);
+      page++;
+
+      // Safety limit — max 20 pages
+      if (page > 20) {
+        console.log('Reached 20 page limit');
+        hasMorePages = false;
+      }
+
+      // Small delay between pages to avoid HF rate limiting
+      await sleep(2000);
+
     } catch (e) {
-      console.log(`Page ${page} error:`, e.message);
-      break;
+      console.log(`Stopped at page ${page}:`, e.message);
+      hasMorePages = false;
     }
   }
 
+  console.log(`Total questions extracted: ${allQuestions.length}`);
   return allQuestions;
 }
 
@@ -90,6 +105,13 @@ If no questions are visible, return an empty array: []`;
   const data = await response.json();
   console.log(`Page ${pageNum} Qwen response:`, JSON.stringify(data).slice(0, 200));
 
+  // Handle HF model loading
+  if (data.error && data.error.includes('loading')) {
+    console.log('Model loading, waiting 20 seconds...');
+    await sleep(20000);
+    return sendToQwen(imageBuffer, courseCode, year, pageNum);
+  }
+
   const text = data.choices?.[0]?.message?.content || '';
 
   try {
@@ -100,6 +122,10 @@ If no questions are visible, return an empty array: []`;
     console.error(`Page ${pageNum} parse error:`, e.message);
     return [];
   }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 module.exports = { extractQuestionsFromPDF };
