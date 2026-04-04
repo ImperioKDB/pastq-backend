@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const MODEL = 'qwen/qwen2.5-vl-72b-instruct:free';
+const MODEL = 'nvidia/nemotron-nano-12b-vl:free';
 
 async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) {
   const prompt = 'You are an academic assistant analyzing a Nigerian university exam paper. '
