@@ -3,64 +3,50 @@ const fetch = require('node-fetch');
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const MODEL = 'qwen/qwen2.5-vl-72b-instruct:free';
 
-async function pdfBufferToImages(buffer) {
-  // Dynamic import because mupdf is an ESM module
-  const mupdf = await import('mupdf');
-  const images = [];
+async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) {
+  const prompt = 'You are an academic assistant analyzing a Nigerian university exam paper.\n'
+    + 'Extract ALL questions from this document.\n'
+    + 'Return ONLY a JSON array with no explanation and no markdown formatting.\n\n'
+    + 'Each question object must have exactly these fields:\n'
+    + '- content: the full question text (string)\n'
+    + '- type: "mcq" if it has options A-D, "theory" if it does not\n'
+    + '- options: array of 4 option strings if MCQ, null if theory\n'
+    + '- answer: the correct option string if identifiable, null if not\n'
+    + '- topic: the subject topic (e.g. "Calculus", "Cell Biology")\n'
+    + '- difficulty: "easy", "medium", or "hard"\n\n'
+    + 'Course: ' + courseCode + '\n'
+    + 'Year: ' + year + '\n\n'
+    + 'Return only the JSON array. No extra text.';
 
-  const doc = mupdf.Document.openDocument(buffer, 'application/pdf');
-  const pageCount = doc.countPages();
-  console.log(`PDF has ${pageCount} pages`);
+  // Convert buffer to base64
+  const base64Data = fileBuffer.toString('base64');
 
-  for (let i = 0; i < pageCount; i++) {
-    const page = doc.loadPage(i);
-    const pixmap = page.toPixmap(
-      mupdf.Matrix.scale(1.5, 1.5),
-      mupdf.ColorSpace.DeviceRGB,
-      false
-    );
-    const png = pixmap.asPNG();
-    images.push(Buffer.from(png).toString('base64'));
-    pixmap.destroy();
-    page.destroy();
+  // Build the file content block
+  var fileContent;
+  if (mimeType === 'application/pdf') {
+    fileContent = {
+      type: 'file',
+      file: {
+        filename: 'exam.pdf',
+        file_data: 'data:application/pdf;base64,' + base64Data
+      }
+    };
+  } else {
+    fileContent = {
+      type: 'image_url',
+      image_url: {
+        url: 'data:' + mimeType + ';base64,' + base64Data
+      }
+    };
   }
-
-  doc.destroy();
-  return images;
-}
-
-async function extractQuestionsFromImages(base64Images, courseCode, year) {
-  const imageMessages = base64Images.map(b64 => ({
-    type: 'image_url',
-    image_url: {
-      url: `data:image/png;base64,${b64}`,
-    },
-  }));
-
-  const prompt = `You are an academic assistant analyzing a Nigerian university exam paper.
-Extract ALL questions from these pages.
-Return ONLY a JSON array with no explanation and no markdown formatting.
-
-Each question object must have exactly these fields:
-- content: the full question text (string)
-- type: "mcq" if it has options A-D, "theory" if it does not
-- options: array of 4 option strings if MCQ, null if theory
-- answer: the correct option string if identifiable, null if not
-- topic: the subject topic (e.g. "Calculus", "Cell Biology")
-- difficulty: "easy", "medium", or "hard"
-
-Course: ${courseCode}
-Year: ${year}
-
-Return only the JSON array. No extra text.`;
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'Authorization': 'Bearer ' + OPENROUTER_API_KEY,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://pastq-frontend.vercel.app',
-      'X-Title': 'PastQ',
+      'X-Title': 'PastQ'
     },
     body: JSON.stringify({
       model: MODEL,
@@ -68,29 +54,31 @@ Return only the JSON array. No extra text.`;
         {
           role: 'user',
           content: [
-            ...imageMessages,
-            { type: 'text', text: prompt },
-          ],
-        },
+            fileContent,
+            { type: 'text', text: prompt }
+          ]
+        }
       ],
-      max_tokens: 4000,
-    }),
+      max_tokens: 4000
+    })
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenRouter API error: ${response.status} — ${errorText}`);
+    throw new Error('OpenRouter API error: ' + response.status + ' - ' + errorText);
   }
 
   const data = await response.json();
-  const text = data.choices?.[0]?.message?.content || '';
+  const text = (data.choices && data.choices[0] && data.choices[0].message) ? data.choices[0].message.content : '';
 
-  console.log('Raw AI response preview:', text.slice(0, 200));
+  console.log('Raw AI response preview: ' + text.slice(0, 300));
 
   try {
     const cleaned = text.replace(/```json|```/g, '').trim();
     const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
     return [];
   } catch (e) {
     console.error('Failed to parse AI response:', e);
@@ -99,15 +87,7 @@ Return only the JSON array. No extra text.`;
   }
 }
 
-async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) {
-  let base64Images = [];
-
-  if (mimeType === 'application/pdf') {
-    console.log('Converting PDF pages to images with MuPDF...');
-    base64Images = await pdfBufferToImages(fileBuffer);
-    console.log(`Converted ${base64Images.length} pages`);
-  } else if (mimeType.startsWith('image/')) {
-    base64Images = [fileBuffer.toString('base64')];
+module.exports = { extractQuestionsFromFile: extractQuestionsFromFile };    base64Images = [fileBuffer.toString('base64')];
     console.log('Single image upload, using directly');
   } else {
     throw new Error(`Unsupported file type: ${mimeType}`);
