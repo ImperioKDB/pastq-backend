@@ -1,37 +1,55 @@
 const fetch = require('node-fetch');
-const { fromBuffer } = require('pdf2pic');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+const mupdf = require('mupdf');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const MODEL = 'qwen/qwen2.5-vl-72b-instruct:free';
 
 /**
- * Converts a PDF buffer into an array of base64-encoded JPEG images (one per page)
+ * Converts every page of a PDF buffer into base64 PNG images using MuPDF.
+ * Works for both text-based and scanned PDFs.
+ * No ImageMagick or Ghostscript needed.
  */
 async function pdfBufferToImages(buffer) {
-  const converter = fromBuffer(buffer, {
-    density: 150,
-    format: 'jpeg',
-    width: 1200,
-    height: 1600,
-    saveFilename: `page_${Date.now()}`,
-    savePath: os.tmpdir(),
-  });
+  const images = [];
 
-  const pages = await converter.bulk(-1, { responseType: 'base64' });
-  return pages.map(page => page.base64);
+  // Open the PDF from buffer
+  const doc = mupdf.Document.openDocument(buffer, 'application/pdf');
+  const pageCount = doc.countPages();
+
+  console.log(`PDF has ${pageCount} pages`);
+
+  for (let i = 0; i < pageCount; i++) {
+    const page = doc.loadPage(i);
+
+    // Scale 1.5x for good resolution without being too large
+    const pixmap = page.toPixmap(
+      mupdf.Matrix.scale(1.5, 1.5),
+      mupdf.ColorSpace.DeviceRGB,
+      false
+    );
+
+    // Convert page to PNG then base64
+    const png = pixmap.asPNG();
+    images.push(Buffer.from(png).toString('base64'));
+
+    // Free memory after each page
+    pixmap.destroy();
+    page.destroy();
+  }
+
+  doc.destroy();
+  return images;
 }
 
 /**
- * Sends page images to Qwen2.5-VL via OpenRouter and extracts questions
+ * Sends a batch of base64 images to Qwen via OpenRouter
+ * and returns extracted questions as a JSON array
  */
 async function extractQuestionsFromImages(base64Images, courseCode, year) {
   const imageMessages = base64Images.map(b64 => ({
     type: 'image_url',
     image_url: {
-      url: `data:image/jpeg;base64,${b64}`,
+      url: `data:image/png;base64,${b64}`,
     },
   }));
 
@@ -98,18 +116,19 @@ Return only the JSON array. No extra text.`;
 }
 
 /**
- * Main export — handles both PDFs and images
+ * Main export — handles both PDFs and direct image uploads
  */
 async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) {
   let base64Images = [];
 
   if (mimeType === 'application/pdf') {
-    console.log('Converting PDF pages to images...');
+    console.log('Converting PDF pages to images with MuPDF...');
     base64Images = await pdfBufferToImages(fileBuffer);
     console.log(`Converted ${base64Images.length} pages`);
   } else if (mimeType.startsWith('image/')) {
+    // Direct image upload — use as-is
     base64Images = [fileBuffer.toString('base64')];
-    console.log('Single image file, using directly');
+    console.log('Single image upload, using directly');
   } else {
     throw new Error(`Unsupported file type: ${mimeType}`);
   }
@@ -118,7 +137,7 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
     throw new Error('No pages could be extracted from the file');
   }
 
-  // Process in batches of 10 pages
+  // Process in batches of 10 pages to avoid timeouts
   const BATCH_SIZE = 10;
   const allQuestions = [];
 
@@ -131,3 +150,5 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
 
   return allQuestions;
 }
+
+module.exports = { extractQuestionsFromFile };
