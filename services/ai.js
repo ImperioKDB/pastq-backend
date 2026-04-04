@@ -4,7 +4,7 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
 
 async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) {
-  const prompt = 'You are an academic assistant analyzing a Nigerian university exam paper. '
+  var prompt = 'You are an academic assistant analyzing a Nigerian university exam paper. '
     + 'Extract ALL questions from this document. '
     + 'Return ONLY a JSON array with no explanation and no markdown. '
     + 'Each item must have: content, type ("mcq" or "theory"), options (array of 4 or null), '
@@ -63,9 +63,23 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
   }
 
   var data = await response.json();
+
+  // Log full response so we can debug
+  console.log('Full API response: ' + JSON.stringify(data).slice(0, 500));
+
   var text = '';
-  if (data.choices && data.choices[0] && data.choices[0].message) {
+  if (
+    data.choices &&
+    data.choices[0] &&
+    data.choices[0].message &&
+    data.choices[0].message.content
+  ) {
     text = data.choices[0].message.content;
+  }
+
+  if (!text) {
+    console.error('Model returned empty content. Full response: ' + JSON.stringify(data));
+    return [];
   }
 
   console.log('AI response preview: ' + text.slice(0, 300));
@@ -76,10 +90,11 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
     }
+    console.error('No JSON array found in response');
     return [];
   } catch (e) {
     console.error('Failed to parse response:', e);
-    console.log('Full response:', text);
+    console.log('Full response text:', text);
     return [];
   }
 }
