@@ -4,12 +4,13 @@ const supabase = require('../db');
 
 // Get questions with filters
 router.get('/', async (req, res) => {
-  const { course_id, year, type } = req.query;
+  const { course_id, year, type, topic } = req.query;
 
   let query = supabase.from('questions').select('*, courses(code, title)');
   if (course_id) query = query.eq('course_id', course_id);
   if (year) query = query.eq('year', year);
   if (type) query = query.eq('type', type);
+  if (topic) query = query.ilike('topic', `%${topic}%`);
 
   const { data, error } = await query.order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
@@ -17,10 +18,8 @@ router.get('/', async (req, res) => {
 });
 
 // Submit a question manually
-// Submit a question manually
 router.post('/', async (req, res) => {
   try {
-    console.log('Request body:', req.body);
     const { course_id, year, content, type, options, answer, topic } = req.body;
 
     if (!course_id || !content) {
@@ -32,16 +31,12 @@ router.post('/', async (req, res) => {
       .insert([{ course_id, year, content, type, options, answer, topic }])
       .select();
 
-    if (error) {
-      console.error('Supabase error:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
+    if (error) return res.status(500).json({ error: error.message });
     res.status(201).json(data[0]);
   } catch (err) {
-    console.error('Server error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 module.exports = router;
+                        
