@@ -5,10 +5,12 @@ const MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
 
 async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) {
   var prompt = 'You are an academic assistant analyzing a Nigerian university exam paper. '
-    + 'Extract ALL questions from this document. '
+    + 'Extract questions from this document. '
     + 'Return ONLY a JSON array with no explanation and no markdown. '
-    + 'Each item must have: content, type ("mcq" or "theory"), options (array of 4 or null), '
+    + 'Each item must have: content, type ("mcq" or "theory"), options (array of exactly 4 strings A B C D or null), '
     + 'answer (string or null), topic (string), difficulty ("easy", "medium", or "hard"). '
+    + 'IMPORTANT: MCQ options must be exactly 4 strings. Do not include more than 4 options. '
+    + 'Extract a maximum of 30 questions only. '
     + 'Course: ' + courseCode + '. Year: ' + year + '. '
     + 'Return only the JSON array. No extra text.';
 
@@ -43,7 +45,7 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
         ]
       }
     ],
-    max_tokens: 4000
+    max_tokens: 8000
   });
 
   var response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -64,7 +66,6 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
 
   var data = await response.json();
 
-  // Log full response so we can debug
   console.log('Full API response: ' + JSON.stringify(data).slice(0, 500));
 
   var text = '';
@@ -99,4 +100,4 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
   }
 }
 
-module.exports = { extractQuestionsFromFile: extractQuestionsFromFile };
+module.exports = { extractQuestionsFromFile
