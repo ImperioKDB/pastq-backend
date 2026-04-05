@@ -69,17 +69,12 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
   console.log('Full API response: ' + JSON.stringify(data).slice(0, 500));
 
   var text = '';
-  if (
-    data.choices &&
-    data.choices[0] &&
-    data.choices[0].message &&
-    data.choices[0].message.content
-  ) {
+  if (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
     text = data.choices[0].message.content;
   }
 
   if (!text) {
-    console.error('Model returned empty content. Full response: ' + JSON.stringify(data));
+    console.error('Model returned empty. Full response: ' + JSON.stringify(data));
     return [];
   }
 
@@ -100,4 +95,4 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
   }
 }
 
-module.exports = { extractQuestionsFromFile
+module.exports = { extractQuestionsFromFile: extractQuestionsFromFile };
