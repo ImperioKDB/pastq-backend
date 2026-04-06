@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const MODEL = 'nvidia/nemotron-nano-12b-v2-vl:free';
+const MODEL = 'qwen/qwen-2-vl-7b-instruct:free';
 
 async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) {
 
@@ -97,7 +97,6 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
     var jsonMatch = cleaned.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
       var questions = JSON.parse(jsonMatch[0]);
-      // Sanitize: if any MCQ option is just a single letter, mark as bad extraction
       var valid = questions.filter(function(q) {
         if (q.type === 'mcq' && Array.isArray(q.options)) {
           var allLetters = q.options.every(function(o) {
