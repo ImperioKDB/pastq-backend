@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const MODEL = 'qwen/qwen-2-vl-7b-instruct:free';
+const MODEL = 'openrouter/free';
 
 async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) {
 
