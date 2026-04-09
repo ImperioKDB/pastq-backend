@@ -1,7 +1,11 @@
 const fetch = require('node-fetch');
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const MODEL = 'openrouter/free';
+const MODELS = [
+  'openai/gpt-oss-100b:free',
+  'nvidia/nemotron-nano-12b-v2-vl:free',
+  'qwen/qwen2.5-vl-72b-instruct:free',
+];
 
 async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) {
   var base64Data = fileBuffer.toString('base64');
@@ -26,7 +30,7 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
 
   var allQuestions = [];
   var batchSize = 30;
-  var maxBatches = 4; // up to 120 questions total
+  var maxBatches = 4;
 
   for (var batch = 0; batch < maxBatches; batch++) {
     var startFrom = batch * batchSize + 1;
@@ -50,14 +54,14 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
       + 'Each question must have:\n'
       + '- content: question text only, no options\n'
       + '- type: "mcq" if multiple choice, "theory" if open ended\n'
-      + '- options: array of exactly 4 full-text strings for MCQ, null for theory\n'
+      + '- options: array of full-text strings for MCQ (can be 4 or 5), null for theory\n'
       + '- answer: full text of correct answer for MCQ (must match one of the options exactly), null if not shown\n'
       + '- topic: subject topic (e.g. "Kinematics", "Algebra", "Vectors")\n'
       + '- difficulty: "easy", "medium", or "hard"\n\n'
       + 'Course: ' + courseCode + '. Year: ' + year + '.\n'
       + 'Return only the JSON array. Nothing else.';
 
-    var batchResult = await callOpenRouter(fileContent, prompt);
+    var batchResult = await callWithRetry(fileContent, prompt);
 
     console.log('Batch ' + (batch + 1) + ' returned ' + batchResult.length + ' questions');
 
@@ -68,8 +72,7 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
 
     allQuestions = allQuestions.concat(batchResult);
 
-    // Small delay between batches to avoid rate limiting
-    if (batch < maxBatches - 1 && batchResult.length === batchSize) {
+    if (batch < maxBatches - 1 && batchResult.length >= batchSize - 2) {
       console.log('Waiting 3s before next batch...');
       await sleep(3000);
     } else {
@@ -77,13 +80,34 @@ async function extractQuestionsFromFile(fileBuffer, mimeType, courseCode, year) 
     }
   }
 
-  console.log('Total questions extracted across all batches: ' + allQuestions.length);
+  console.log('Total questions extracted: ' + allQuestions.length);
   return allQuestions;
 }
 
-async function callOpenRouter(fileContent, prompt) {
+async function callWithRetry(fileContent, prompt) {
+  for (var attempt = 0; attempt < MODELS.length; attempt++) {
+    var model = MODELS[attempt];
+    try {
+      console.log('Trying model: ' + model);
+      var result = await callOpenRouter(fileContent, prompt, model);
+      return result;
+    } catch (e) {
+      console.warn('Model ' + model + ' failed: ' + e.message);
+      if (attempt < MODELS.length - 1) {
+        console.log('Trying next model...');
+        await sleep(2000);
+      } else {
+        console.error('All models failed');
+        return [];
+      }
+    }
+  }
+  return [];
+}
+
+async function callOpenRouter(fileContent, prompt, model) {
   var body = JSON.stringify({
-    model: MODEL,
+    model: model,
     messages: [
       {
         role: 'user',
@@ -121,8 +145,7 @@ async function callOpenRouter(fileContent, prompt) {
   }
 
   if (!text) {
-    console.error('Model returned empty. Full response: ' + JSON.stringify(data));
-    return [];
+    throw new Error('Model returned empty content');
   }
 
   try {
@@ -155,4 +178,4 @@ function sleep(ms) {
   return new Promise(function(resolve) { setTimeout(resolve, ms); });
 }
 
-module.exports = { extractQuestionsFromFile: extractQuestionsFromFile };
+module.exports = { extractQuestionsFromFile
