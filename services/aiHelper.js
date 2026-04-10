@@ -1,10 +1,10 @@
 const fetch = require('node-fetch');
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const MODELS = [
+  'openai/gpt-oss-120b:free',
   'google/gemma-4-31b-it:free',
   'google/gemma-4-26b-a4b-it:free',
 ];
-
 function sleep(ms) {
   return new Promise(function(resolve) { setTimeout(resolve, ms); });
 }
