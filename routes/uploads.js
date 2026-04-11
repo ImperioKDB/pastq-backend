@@ -37,8 +37,8 @@ router.post('/', upload.single('file'), async (req, res) => {
         .insert([{
           id: course_id,
           code: course_code,
-          name: course_code,
-          school_id: process.env.DEFAULT_SCHOOL_ID,
+          title: course_code,
+          department_id: process.env.DEFAULT_DEPARTMENT_ID,
         }]);
       if (courseError) {
         console.error('Auto-create course failed:', courseError.message);
