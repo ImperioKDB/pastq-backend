@@ -23,6 +23,30 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     console.log(`File received: ${file.originalname} (${file.mimetype}, ${(file.size / 1024).toFixed(1)}KB)`);
 
+    // Step 0: Auto-create course if it doesn't exist
+    const { data: existingCourse } = await supabase
+      .from('courses')
+      .select('id')
+      .eq('id', course_id)
+      .single();
+
+    if (!existingCourse) {
+      console.log(`Course ${course_id} not found — auto-creating as "${course_code}"`);
+      const { error: courseError } = await supabase
+        .from('courses')
+        .insert([{
+          id: course_id,
+          code: course_code,
+          name: course_code,
+          school_id: process.env.DEFAULT_SCHOOL_ID,
+        }]);
+      if (courseError) {
+        console.error('Auto-create course failed:', courseError.message);
+      } else {
+        console.log(`Course "${course_code}" auto-created successfully`);
+      }
+    }
+
     // Step 1: Upload raw file to Supabase Storage
     const fileName = `uploads/${Date.now()}_${file.originalname}`;
     const { data: fileData, error: fileError } = await supabase.storage
