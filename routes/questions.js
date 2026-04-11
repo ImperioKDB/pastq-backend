@@ -2,11 +2,10 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../db');
 
-// Get questions with filters
 router.get('/', async (req, res) => {
   const { course_id, year, type, topic } = req.query;
 
-  let query = supabase.from('questions').select('*, courses(code, name)');
+  let query = supabase.from('questions').select('*, courses(code, title)');
   if (course_id) query = query.eq('course_id', course_id);
   if (year) query = query.eq('year', year);
   if (type) query = query.eq('type', type);
@@ -17,7 +16,6 @@ router.get('/', async (req, res) => {
   res.json(data);
 });
 
-// Submit a question manually
 router.post('/', async (req, res) => {
   try {
     const { course_id, year, content, type, options, answer, topic } = req.body;
