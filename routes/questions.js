@@ -6,7 +6,7 @@ const supabase = require('../db');
 router.get('/', async (req, res) => {
   const { course_id, year, type, topic } = req.query;
 
-  let query = supabase.from('questions').select('*, courses(code, title)');
+  let query = supabase.from('questions').select('*, courses(code, name)');
   if (course_id) query = query.eq('course_id', course_id);
   if (year) query = query.eq('year', year);
   if (type) query = query.eq('type', type);
@@ -39,4 +39,3 @@ router.post('/', async (req, res) => {
 });
 
 module.exports = router;
-                        
