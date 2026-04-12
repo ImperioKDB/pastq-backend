@@ -88,18 +88,47 @@ router.post('/', upload.single('file'), async (req, res) => {
       return res.status(422).json({ error: 'No questions could be extracted from this file' });
     }
 
-    // Step 5: Save questions to Supabase
-    const questionsToInsert = questions.map(q => ({
-      course_id,
-      year: parseInt(year),
-      content: q.content,
-      type: q.type || 'mcq',
-      options: q.options || null,
-      answer: q.answer || null,
-      topic: q.topic || null,
-      difficulty: q.difficulty || 'medium',
-      verified: false,
-    }));
+    // Step 5: Deduplicate and save questions
+    const questionsToInsert = [];
+    let skipped = 0;
+
+    for (const q of questions) {
+      if (!q.content) continue;
+
+      const { data: existing } = await supabase
+        .from('questions')
+        .select('id')
+        .eq('course_id', course_id)
+        .ilike('content', q.content.trim().slice(0, 100))
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        skipped++;
+        continue;
+      }
+
+      questionsToInsert.push({
+        course_id,
+        year: parseInt(year),
+        content: q.content,
+        type: q.type || 'mcq',
+        options: q.options || null,
+        answer: q.answer || null,
+        topic: q.topic || null,
+        difficulty: q.difficulty || 'medium',
+        verified: false,
+      });
+    }
+
+    if (questionsToInsert.length === 0) {
+      if (uploadRecordId) {
+        await supabase.from('uploads').update({ status: 'done' }).eq('id', uploadRecordId);
+      }
+      return res.status(200).json({
+        message: `⚠️ All ${skipped} questions already exist — nothing new added.`,
+        questions: [],
+      });
+    }
 
     const { data: savedQuestions, error: qError } = await supabase
       .from('questions')
@@ -114,7 +143,7 @@ router.post('/', upload.single('file'), async (req, res) => {
     }
 
     res.status(201).json({
-      message: `✅ ${savedQuestions.length} questions extracted and saved`,
+      message: `✅ ${savedQuestions.length} new questions saved. ${skipped} duplicates skipped.`,
       questions: savedQuestions,
     });
 
