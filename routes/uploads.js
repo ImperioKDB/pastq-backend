@@ -16,10 +16,10 @@ router.post('/', upload.single('file'), async (req, res) => {
     const { course_id, course_code, year } = req.body;
     const file = req.file;
 
-    if (!file) return res.status(400).json({ error: 'No file uploaded' });
-    if (!course_id) return res.status(400).json({ error: 'course_id is required' });
+    if (!file)        return res.status(400).json({ error: 'No file uploaded' });
+    if (!course_id)   return res.status(400).json({ error: 'course_id is required' });
     if (!course_code) return res.status(400).json({ error: 'course_code is required' });
-    if (!year) return res.status(400).json({ error: 'year is required' });
+    if (!year)        return res.status(400).json({ error: 'year is required' });
 
     console.log(`File received: ${file.originalname} (${file.mimetype}, ${(file.size / 1024).toFixed(1)}KB)`);
 
@@ -40,11 +40,8 @@ router.post('/', upload.single('file'), async (req, res) => {
           title: course_code,
           department_id: process.env.DEFAULT_DEPARTMENT_ID,
         }]);
-      if (courseError) {
-        console.error('Auto-create course failed:', courseError.message);
-      } else {
-        console.log(`Course "${course_code}" auto-created successfully`);
-      }
+      if (courseError) console.error('Auto-create course failed:', courseError.message);
+      else console.log(`Course "${course_code}" auto-created successfully`);
     }
 
     // Step 1: Upload raw file to Supabase Storage
@@ -63,50 +60,39 @@ router.post('/', upload.single('file'), async (req, res) => {
       .select()
       .single();
 
-    if (uploadError) {
-      console.error('Failed to create upload record:', uploadError.message);
-    } else {
-      uploadRecordId = uploadRecord.id;
-    }
+    if (uploadError) console.error('Failed to create upload record:', uploadError.message);
+    else uploadRecordId = uploadRecord.id;
 
     // Step 3: Extract questions using AI
     console.log('Starting AI extraction...');
-    const questions = await extractQuestionsFromFile(
-      file.buffer,
-      file.mimetype,
-      course_code,
-      year
-    );
-
+    const questions = await extractQuestionsFromFile(file.buffer, file.mimetype, course_code, year);
     console.log(`AI extracted ${questions.length} questions`);
 
-    // Step 4: Handle empty extraction
     if (questions.length === 0) {
-      if (uploadRecordId) {
-        await supabase.from('uploads').update({ status: 'failed' }).eq('id', uploadRecordId);
-      }
+      if (uploadRecordId) await supabase.from('uploads').update({ status: 'failed' }).eq('id', uploadRecordId);
       return res.status(422).json({ error: 'No questions could be extracted from this file' });
     }
 
-    // Step 5: Deduplicate and save questions
+    // Step 4: Single bulk fetch of existing content for this course (replaces N+1 loop)
+    const { data: existingQuestions } = await supabase
+      .from('questions')
+      .select('content')
+      .eq('course_id', course_id);
+
+    // Build a Set of normalised content snippets for O(1) lookups
+    const existingSnippets = new Set(
+      (existingQuestions || []).map(q => q.content.trim().slice(0, 100).toLowerCase())
+    );
+
+    // Step 5: Filter duplicates in memory
     const questionsToInsert = [];
     let skipped = 0;
 
     for (const q of questions) {
       if (!q.content) continue;
-
-      const { data: existing } = await supabase
-        .from('questions')
-        .select('id')
-        .eq('course_id', course_id)
-        .ilike('content', q.content.trim().slice(0, 100))
-        .limit(1);
-
-      if (existing && existing.length > 0) {
-        skipped++;
-        continue;
-      }
-
+      const snippet = q.content.trim().slice(0, 100).toLowerCase();
+      if (existingSnippets.has(snippet)) { skipped++; continue; }
+      existingSnippets.add(snippet); // prevent dupes within this batch too
       questionsToInsert.push({
         course_id,
         year: parseInt(year),
@@ -121,15 +107,14 @@ router.post('/', upload.single('file'), async (req, res) => {
     }
 
     if (questionsToInsert.length === 0) {
-      if (uploadRecordId) {
-        await supabase.from('uploads').update({ status: 'done' }).eq('id', uploadRecordId);
-      }
+      if (uploadRecordId) await supabase.from('uploads').update({ status: 'done' }).eq('id', uploadRecordId);
       return res.status(200).json({
         message: `⚠️ All ${skipped} questions already exist — nothing new added.`,
         questions: [],
       });
     }
 
+    // Step 6: Single batch insert
     const { data: savedQuestions, error: qError } = await supabase
       .from('questions')
       .insert(questionsToInsert)
@@ -137,10 +122,8 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     if (qError) throw new Error(`Failed to save questions: ${qError.message}`);
 
-    // Step 6: Mark upload as done
-    if (uploadRecordId) {
-      await supabase.from('uploads').update({ status: 'done' }).eq('id', uploadRecordId);
-    }
+    // Step 7: Mark upload as done
+    if (uploadRecordId) await supabase.from('uploads').update({ status: 'done' }).eq('id', uploadRecordId);
 
     res.status(201).json({
       message: `✅ ${savedQuestions.length} new questions saved. ${skipped} duplicates skipped.`,
@@ -149,9 +132,7 @@ router.post('/', upload.single('file'), async (req, res) => {
 
   } catch (err) {
     console.error('Upload error:', err.message);
-    if (uploadRecordId) {
-      await supabase.from('uploads').update({ status: 'failed' }).eq('id', uploadRecordId);
-    }
+    if (uploadRecordId) await supabase.from('uploads').update({ status: 'failed' }).eq('id', uploadRecordId);
     res.status(500).json({ error: err.message });
   }
 });
