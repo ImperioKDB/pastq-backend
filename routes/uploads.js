@@ -2,25 +2,26 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const supabase = require('../db');
-const { processExtractionInBackground } = require('../services/ai');
+const { requireAuth } = require('../middleware/auth');
+const { enqueueExtraction } = require('../services/ai');
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB limit
 });
 
-router.post('/', upload.single('file'), async (req, res) => {
+// Requires auth — extraction burns real API credits per call, this was
+// previously callable by anyone with the URL.
+router.post('/', requireAuth, upload.single('file'), async (req, res) => {
   try {
     const { course_id, course_code, year } = req.body;
     const file = req.file;
 
-    // 1. Validate request
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
     if (!course_id || !course_code || !year) {
       return res.status(400).json({ error: 'course_id, course_code, and year are required' });
     }
 
-    // 2. Upload raw file to Supabase Storage
     const fileName = `uploads/${Date.now()}_${file.originalname}`;
     const { data: fileData, error: fileError } = await supabase.storage
       .from('past-questions')
@@ -29,38 +30,34 @@ router.post('/', upload.single('file'), async (req, res) => {
     if (fileError) throw new Error('Storage upload failed: ' + fileError.message);
     const fileUrl = fileData?.path || fileName;
 
-    // 3. Create upload record in DB
     const { data: uploadRecord, error: uploadError } = await supabase
       .from('uploads')
-      .insert([{ 
-        file_url: fileUrl, 
-        course_id, 
-        year: parseInt(year), 
-        status: 'processing' 
+      .insert([{
+        file_url: fileUrl,
+        course_id,
+        year: parseInt(year),
+        status: 'queued',
+        uploaded_by: req.user.id,
       }])
       .select()
       .single();
 
     if (uploadError) throw new Error('DB record creation failed: ' + uploadError.message);
 
-    // 4. Return 202 Accepted IMMEDIATELY to prevent frontend timeouts
-    res.status(202).json({ 
-      message: 'Upload received. AI extraction started in background.', 
-      upload_id: uploadRecord.id 
+    res.status(202).json({
+      message: 'Upload received and queued for extraction.',
+      upload_id: uploadRecord.id,
     });
 
-    // 5. Fire and forget: Process AI in the background
-    // Note: For true production scale at high volume, move this to a message queue (BullMQ) 
-    // or Supabase Edge Functions. For now, this prevents the HTTP thread from blocking.
-    processExtractionInBackground(
-      uploadRecord.id, 
-      file.buffer, 
-      file.mimetype, 
-      course_id, 
-      course_code, 
-      parseInt(year)
-    ).catch(err => {
-      console.error(`[Background Worker] Extraction failed for upload ${uploadRecord.id}:`, err.message);
+    // Hand off to the bounded-concurrency worker instead of firing an
+    // unbounded async call per request. See services/ai.js.
+    enqueueExtraction({
+      uploadId: uploadRecord.id,
+      fileBuffer: file.buffer,
+      mimeType: file.mimetype,
+      courseId: course_id,
+      courseCode: course_code,
+      year: parseInt(year),
     });
 
   } catch (err) {
