@@ -2,5 +2,5 @@ services:
   - type: web
     name: pastq-backend
     runtime: node
-    buildCommand: apt-get install -y graphicsmagick ghostscript && npm install
+    buildCommand: npm install
     startCommand: node index.js
